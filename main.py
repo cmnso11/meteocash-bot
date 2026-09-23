@@ -230,3 +230,74 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         print("Бот остановлен")
+        import os
+import asyncio
+import requests
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiohttp import web
+
+# --- НАСТРОЙКИ И ТОКЕНЫ ---
+TOKEN = "ТВОЙ_ТОКЕН_БОТА_ЗДЕСЬ"  # Вставь сюда токен от BotFather
+
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+
+# Переменные для хранения состояния (город пользователя)
+user_cities = {}
+
+# --- ВЕБ-СЕРВЕР ДЛЯ RENDER (чтобы бот работал 24/7) ---
+async def handle(request):
+    return web.Response(text="MeteoCash Bot is active 24/7!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+# --- ОБРАБОТКА КОМАНДЫ /start ---
+@dp.message(Command("start"))
+async def start_handler(message: types.Message):
+    user_name = message.from_user.first_name
+    await message.answer(
+        f"Привет, {user_name}⚡️! Я бот MeteoCash ⚡️\n\n"
+        "Пиши названия городов, проверяй погоду или конвертируй деньги (например: 1000 руб или 100 сомони)!"
+    )
+
+# --- ОБРАБОТКА ВСЕХ СООБЩЕНИЙ (Погода и Валюты) ---
+@dp.message()
+async def process_message(message: types.Message):
+    text = message.text.strip()
+    user_id = message.from_user.id
+
+    # 1. Проверка на запрос погоды
+    if text.lower() == "погода сейчас":
+        city = user_cities.get(user_id)
+        if not city:
+            await message.answer("Сначала напиши название своего города!")
+        else:
+            await message.answer(f"Погода в городе {city}: ☀️ +22°C, ясно.")
+        return
+
+    # 2. Проверка на конвертацию валют
+    if any(word in text.lower() for word in ["руб", "сомони", "доллар", "$", "rub"]):
+        await message.answer("Результат конвертации: 1000 руб = 140 сомони (пример).")
+        return
+
+    # 3. Если написано просто название города
+    user_cities[user_id] = text
+    await message.answer(f"Город '{text}' сохранен! Напиши 'Погода сейчас', чтобы узнать погоду.")
+
+# --- ГЛАВНАЯ ТОЧКА ВХОДА ---
+async def main():
+    # Запускаем фоновый веб-сервер
+    await start_web_server()
+    # Запускаем бота
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
