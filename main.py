@@ -1,8 +1,8 @@
 import os
 import re
 import asyncio
+import threading
 import requests
-from datetime import datetime, timedelta
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -13,10 +13,8 @@ TOKEN = "8912083970:AAFwFsqJMIPYEsK64dVPIPe_xZgnMyGRYJk"
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Хранилище последнего выбранного города
 user_cities = {}
 
-# Коды погоды WMO
 WEATHER_CODES = {
     0: "☀️ Ясно", 1: "🌤 Преимущественно ясно", 2: "⛅️ Переменная облачность", 3: "☁️ Пасмурно",
     45: "🌫 Туман", 48: "🌫 Осаждающийся туман",
@@ -26,7 +24,6 @@ WEATHER_CODES = {
     80: "🌧 Ливень", 81: "🌧 Сильный ливень", 82: "🌧 Очень сильный ливень",
 }
 
-# --- КЛАВИАТУРЫ ---
 def get_main_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -36,7 +33,6 @@ def get_main_keyboard():
         resize_keyboard=True
     )
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def get_coordinates(city_name):
     url = f"https://geocoding-api.open-meteo.com/v1/search?name={city_name}&count=1&language=ru&format=json"
     try:
@@ -69,23 +65,16 @@ def get_exchange_rates():
         print(f"Ошибка валют: {e}")
         return None
 
-# --- ВЕБ-СЕРВЕР ДЛЯ RENDER И UPTIMEROBOT ---
-async def handle(request):
-    return web.Response(text="MeteoCash Bot is active!")
-
-async def start_web_server():
+# --- МГНОВЕННЫЙ ВЕБ-СЕРВЕР В ПОТОКЕ ---
+def run_web_server():
     app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    # Render передает необходимый порт в переменной PORT
+    app.router.add_get("/", lambda req: web.Response(text="MeteoCash Bot is active!"))
     port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    print(f"Веб-сервер запущен на порту {port}")
+    web.run_app(app, host="0.0.0.0", port=port, print=None)
 
-# --- ОБРАБОТЧИКИ КОМАНД И СООБЩЕНИЙ ---
+# Запускаем веб-сервер СРАЗУ, до старта бота, чтобы Render поймал открытый порт
+threading.Thread(target=run_web_server, daemon=True).start()
+
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     await message.answer(
@@ -146,7 +135,6 @@ async def send_weather(message: types.Message):
 async def handle_text(message: types.Message):
     text = message.text.strip()
     
-    # 1. Проверка на конвертацию валют
     match = re.search(r"(\d+)\s*(руб|сомони|доллар|\$|rub|tjs|usd)", text.lower())
     if match:
         amount = float(match.group(1))
@@ -165,7 +153,6 @@ async def handle_text(message: types.Message):
                 await message.answer(f"💱 **{amount:.0f} USD** = **{res_tjs:.2f} TJS** | **{res_rub:.2f} RUB**")
             return
 
-    # 2. Поиск города
     lat, lon, city_name, country = get_coordinates(text)
     if lat and lon:
         user_cities[message.from_user.id] = {
@@ -179,15 +166,8 @@ async def handle_text(message: types.Message):
     else:
         await message.answer("Я не нашел такой город или команду. Попробуй еще раз!")
 
-# --- ТОЧКА ВХОДА ---
 async def main():
-    # Очищаем вебхуки и сбрасываем застрявшие подключения, устраняя TelegramConflictError
     await bot.delete_webhook(drop_pending_updates=True)
-    
-    # Запускаем веб-сервер
-    await start_web_server()
-    
-    # Запускаем поллинг бота
     print("Бот MeteoCash запущен и ждет сообщений!")
     await dp.start_polling(bot)
 
